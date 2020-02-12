@@ -1,0 +1,285 @@
+---
+title: "Model Selection"
+author: "Enzo Ramirez, Pauline De Taeye"
+output:
+  pdf_document: default
+  html_notebook: default
+  html_document:
+    df_print: paged
+  word_document: default
+---
+
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+library(tufte)
+library(knitr)
+# invalidate cache when the tufte version changes
+knitr::opts_chunk$set(tidy = FALSE, cache.extra = packageVersion('tufte'), fig.margin=TRUE, fig.dim=c(4,4))
+#options(htmltools.dir.version = FALSE)
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+# Type d'output
+otype <- "html"
+# Some options
+#opts_chunk$set(cache.rebuild=TRUE) 
+```
+
+
+# Application: Choosing a polynomial model for Hitters Salary
+
+We want to explore the relationship between Salary and CHits (performance)
+
+```{r cache=TRUE}
+# Lecture des données
+library(caret)
+library(ISLR)
+# Lecture des données
+data(Hitters)
+Hitters <- na.omit(Hitters)
+attach(Hitters)
+```
+
+## Look at these data (histograms, scatterplot)
+```{r cache=TRUE}
+
+ggplot(Hitters, aes(x=CHits)) + 
+  geom_histogram()
+
+ggplot(Hitters, aes(x=Salary)) + 
+  geom_histogram()
+
+
+ggplot(Hitters, aes( x=Salary, y=CHits)) + 
+  geom_point()+
+  geom_smooth(method=lm)
+
+```
+## Try log transformations
+```{r cache=TRUE}
+
+ggplot(Hitters, aes(x=log(CHits))) + 
+  geom_histogram()
+
+ggplot(Hitters, aes(x=log(Salary))) + 
+  geom_histogram()
+
+
+ggplot(Hitters, aes( x=log(Salary), y=log(CHits))) + 
+  geom_point()+
+  geom_smooth(method=lm)
+
+```
+
+
+
+
+## Select a polynomial model
+```{r cache = TRUE}
+
+# Select Subset
+myvars <- c("CHits", "Salary")
+df <- Hitters[myvars]
+df$lsalary <- log(Hitters$Salary)
+df$lhits <- log(Hitters$CHits)
+attach(df)
+```
+
+
+### Training-Test
+```{r cache=TRUE}
+set.seed(123)
+train=sample(c(TRUE,FALSE), nrow(df),replace=TRUE)
+test=(!train)
+# The max polynomial degree
+maxd <- 9
+# A vector for collecting the criterion value
+cvalue <- vector(mode="numeric",length=maxd)
+# A fit for each degree
+for(d in 1:maxd){
+  lm.fit <- lm(lsalary~poly(lhits,d), data=df[train,])
+  coefi <- coef(lm.fit)
+  test.mat <- model.matrix(lm.fit,data=df[test,])
+  pred <- test.mat%*%coefi
+  cvalue[d] <- mean(((lsalary[test])-pred)^2)
+}
+plot(1:maxd,cvalue,type="b")
+dg <- which.min(cvalue)
+dg
+```
+### PLot the estimated curve
+```{r label= plot1, fig= TRUE, include=TRUE, cache=TRUE}
+lm.opt <- lm(lsalary~poly(lhits,dg), data=df)
+plot(lhits,lsalary, pch=".",
+     main="Salary Hits",
+     xlab="Log(Salary)",
+     ylab = "log(Hits)")
+newx <- seq(from=min(lhits),to=max(lhits),length.out = 200)
+lines(newx, predict(lm.opt, newdata = data.frame(lhits=newx)))
+```
+## Automated Cross-Validation
+```{r cache=TRUE, warning=FALSE, message=FALSE}
+library(pracma)
+library(boot)
+tic()
+# A fit for each degree
+cv <- vector(mode="numeric",length=maxd)
+for(d in 1:maxd){
+  glm.fit <- glm(lsalary~poly(lhits,d), data=df)
+  cv[d] <- cv.glm(data=df,glm.fit)$delta[1]
+}
+plot(1:maxd,cv,type="b")
+which.min(cv)
+toc()
+```
+
+
+
+## k-fold Cross-Validation
+```{r cache=TRUE}
+library(pracma)
+library(boot)
+cv10 <- rep(0,maxd)
+set.seed(123)
+# A fit for each degree
+for(d in 1:maxd){
+  glm.fit <- glm(lsalary~poly(lhits,d), data=df)
+  cv10[d] <- cv.glm(data=df,glm.fit,K=10)$delta[1]
+}
+plot(1:maxd,cv10,type="b")
+dg10 <- which.min(cv10)
+dg10
+lm.opt10 <- lm(lsalary~poly(lhits,dg10), data=df)
+```
+
+Plot the curves
+```{r label= plot1b, fig= TRUE, include=TRUE, cache=FALSE}
+attach(df)
+plot(lhits,lsalary,pch=".",main="Curve",xlab="Log(hits)",ylab = "log(salary)")
+newx <- seq(from=min(lhits),to=max(lhits),length.out = 200)
+lines(newx, predict(lm.opt, newdata = data.frame(lhits=newx)))
+lines(newx, predict(lm.opt10, newdata = data.frame(lhits=newx)),col="blue")
+```
+
+### Cross-Validation by Hand
+```{r cache=TRUE}
+library(caret)
+#library(dplyr)
+# LOOCV
+loocv <- function(fit){
+  h <-lm.influence(fit)$hat
+  mean((residuals(fit)/(1-h))^2)
+}
+# A fit for each degree
+tic()
+for(d in 1:maxd){
+  lm.fit <- lm(lsalary~poly(lhits,d), data=df)
+  cv[d] <- loocv(lm.fit)
+}
+plot(1:maxd,cv,type="b")
+which.min(cv)
+toc()
+```
+
+## K-NN 
+```{r cache=TRUE}
+# LOOCV
+library(foreach)
+loocv.knn <- function(k){
+  knn.fit <- knnreg(lsalary ~ lhits, data = df, k=k+1)
+  u <- lhits - predict(knn.fit,data=df)
+  mean(u^2)*((k+1)/k)^2
+}
+kgrid <- seq(100,200,by=20)
+cv.knn <- foreach(i=1:length(kgrid), .combine=cbind) %do% {
+  loocv.knn(kgrid[i])
+}
+plot(1:length(kgrid),cv.knn,type="b")
+kopt <- kgrid[order(cv.knn)][1]
+kopt
+knn.opt <- knnreg(lsalary ~ lhits, data = df, k=kopt)
+```
+
+## 10-fold CV using caret 
+```{r cache=TRUE}
+set.seed(123)
+tic()
+fitControl <- trainControl(## 10-fold CV
+  method = "repeatedcv",
+  number = 10,
+  ## repeated ten times
+  repeats = 10)
+set.seed(123)
+knn.fit <- train(lsalary ~ lhits, data = df, 
+                 method = "knn", 
+                 trControl = fitControl,
+                 tuneGrid = expand.grid(k = seq(100,200,by=20)))
+results <- knn.fit$results
+kopt <- results[order(results$RMSE),]$k[1]
+kopt
+toc()
+```
+
+## Comparing the curves
+
+```{r label= plot2, fig= TRUE, include=TRUE, cache=TRUE}
+plot(lhits,lsalary,pch=".",main="Curve",xlab="Log(hits)",ylab = "Log(salary")
+newx <- seq(from=min(lhits),to=max(lhits),length.out = 200)
+lines(newx, predict(lm.opt, newdata = data.frame(lhits=newx)))
+lines(newx, predict(lm.opt10, newdata = data.frame(lhits=newx)),col="blue")
+lines(newx, predict(knn.opt, newdata = data.frame(lhits=newx)), col="red")
+legend("topright", legend=c("CV-Poly","10CV-Poly","CV-KNN"),lwd=2, bty="n", col= c("black","blue","red"))
+```
+
+
+## What can you say about the different results? How could you explain these differences?
+
+When we are training a machine learning model we separate our data into two subset, called train and test.
+Our model is then trained on the train data and tested on the test data. 
+Then we will evaluate our model based on a calculation using the error of prediction, the bias of each prediction, the distance between our prediction and the actual value.
+But the sample variability between our training data and test data, could lead us to wrong prediction, in fact our model will give a better prediction on training data but fail to generalize on test data, or it could perform very well on our test data but really bad on others test set.
+He might be overfitting our data where it has been trained.
+We need to be sure that our model his learning most of the patterns correctly, and not too much noisy informations. We are then searching our model to be low on bias and variance.
+To address this issue there exists a method called Cross Validation. There are multiple type of cross-validation techniques with advantages and disadvantages.
+Cross validation is an approach where we split our data in multiple subsets, and we test our model on one subset after it has been trained on the rest of the subsets. This way we can obtain an estimation of how well our model perform.
+
+The K-fold Cross validation techniques split the data into a K number of subsets and each subset, as described before, will be used as a testing set.
+Then, in the first step, the first subset is used to test the model and the rest are used to train the model.
+We repeat the procedure until each subset has been used as test data. The advantage of this procedure  is that it’s relatively faster than other to execute as long as our K is not too large. We reduce our bias and our variance is reduced as we increase the number of our subset
+
+In Leave one out cross validation (LOOCV) we split the data into two subset.
+One subset has a single observation, it will be our test data and in the other subset we have the rest of our data that will form our training data. With n observations our training data contains n-1 observation and test data contains 1 observation. We perform the procedure for each observation.
+We obtain a MSE for each observation.
+One of the main advantage of this method it’s that we reduce considerably our bias as we used all of our data to train.
+The other advantage is that we don't have random result if we perform multiple times LOOCV as it uses all the data. Disadvantage of this method is that our MSE will vary a lot because we have only one observation in our test data, it might introduce variability. And if the data point is an outlier the variability will be a lot higher. Also the execution is costly as it has to be perform as much time as the number of observations.
+
+
+
+***Then how to choose between these two methods ?***
+
+Well, we know that k-fold CV has computational advantages to LOOCV as long as we have less fold than observations. But if we look strictly at the statistical part and performance of our model it’s a question of trade-off between bias and variance.
+
+The bias is the difference between the average prediction of our model and the actual value.
+Model with large bias induce high error on training and test data).
+
+The variance measure the variability of prediction for a certain point. High variance will give an overfit model that perform bad to generalize on data it hasn’t seen before. Model with high variance perform very well on training data but has high error rates on test data.
+
+If we are strictly looking at the bias, LOOCV is more appropriate as it gives almost unbiased estimates. But we should consider the variance as well. And in LOOCV we have a way higher variance than in K-fold CV.
+In fact we use very similar subsets in each step of LOOCV as we only change one observation, from one fold to another, which result in strongly positive correlated output. As oppose to k-fold where we randomly form subsets they will result in less correlated outputs.
+The mean of many highly correlated quantities has higher variance than does the mean of many quantities that are not as highly correlated.
+Therefore the test error from LOOCV will have higher variance than k-fold CV.
+
+In order to choose the method, we face a problem of trade-off between variance and bias.
+
+***LOOCV : high variance and low bias.***
+
+
+***K-Fold : Low variance, higher bias ( relatively to the value of K)***
+
+If we observe our last plot we can not observe a big difference while using LOOCV or K-fold CV.
+But K-NN shows a different plot at least for the first observations, we can assume that as K-NN is non parametric it has not a learning process, and just take an average of the nearest neighbours data points. We don't have much observations for low salary, so we can see that for K-NN an horizontal curve.
+
+
+
+
+

@@ -1,0 +1,432 @@
+
+---
+title: "Statistical Learning"
+author: "Pascal Lavergne"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+  word_document: default
+---
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+# Type d'output
+otype <- "html"
+# Some options
+library(knitr)
+knitr::opts_chunk$set(fig.align="center",
+                      fig.dim=c(4.5,4.5))
+knitr::opts_chunk$set(tidy=TRUE)
+#knitr::opts_chunk$set(cache.rebuild =TRUE)
+```
+
+# Introduction
+## Outils
+
+**Data Scientist**: "Person who is better at statistics than any software engineer and better at software thean any statistician." (J. Wills)
+
+
+- R: la librairie caret (http://topepo.github.io/caret/index.html)
+et ses 238 "modèles", mise à jour régulièrement
+- Python: *Scikit-Learn*
+- Notez que se développent des interfaces pour appeler Python a partir de R: le package *reticulate* permet de faire cela a l'intèrieur d'un document Markdown
+
+## Machine Learning
+- The term *machine learning* is used because the machine (computer) figures out the model from the data 
+
+Compared to a modeler who e.g. specifies 
+$x$ and $y = x'\beta + u$.
+
+- The data may be big or small:
+ typically $\dim(x)$ is large but $n$ can be small or large.
+ 
+1. *Supervised learning*  = Regression
+
+We have both outcome y and regressors (or features) x
+
+*  Regression: y is continuous
+
+*  Classification: y is categorical
+
+En francais, classification se traduit par *discrimination*, mais on utilisera souvent classification par la suite.
+
+2. *Unsupervised learning*
+
+We have no outcome y, only several x
+
+* Cluster Analysis: e.g. determine five types of consumers given many socio-economic  measures.
+
+En francais, cluster analysis se traduit plutot par *classification*
+
+Focus on 1. as this is most used by economists.
+
+
+# Pour débuter
+Courbe d'Engel: décrit la part de la consommation dans un bien (ici la nourriture) par rapport à son revenu ou sa dépense totale
+
+```{r cache=TRUE}
+# Lecture des données
+SouthAfrica <- read.csv2("SouthAfrica.csv")
+# Note that the variables "zij" are dummies for families with "i" adults and "j" kids.
+```
+
+
+```{r cache=TRUE}
+# Select Singles Subset and Reorder According to Expenditure Variable
+Singles <- SouthAfrica[SouthAfrica$z10==1,4:5]  
+#Singles Subset
+Singles <- Singles[order(Singles$ltexp),1:2]	 
+#Reorder so that log expenditure is in increasing order
+FoodShr <- Singles$FoodShr 
+ltexp   <- Singles$ltexp
+Engel <- data.frame(FoodShr,ltexp)
+```
+
+## Histogrammes
+```{r label= plot0, fig= TRUE, include=TRUE, cache=TRUE}
+hist(ltexp,prob=T,breaks=50)
+lines(density(ltexp,na.rm = TRUE),lwd=2)
+hist(FoodShr,prob=T,breaks=50)
+lines(density(FoodShr,na.rm = TRUE),lwd=2)
+```
+
+
+```{r label= plot1, fig= TRUE, include=TRUE, cache=TRUE}
+plot(FoodShr~ltexp, main="Engel Curve",xlab="Log(Exp)",ylab = "FoodShare",pch=".")
+```
+
+# Modèle linéaire
+```{r cache=TRUE}
+lmFood <- lm(FoodShr~ltexp)
+```
+
+```{r cache=TRUE, warning=FALSE, message=FALSE}
+library(sandwich)
+library(stargazer)
+cov <- vcovHC(lmFood, type = "HC")
+robust.se <- sqrt(diag(cov))
+```
+
+
+```{r results="asis", cache=TRUE, include=TRUE}
+stargazer::stargazer(lmFood, type=otype, se=list(robust.se),
+                     title="Linear Model", header=TRUE,
+                     style="aer",
+                     column.sep.width = "1pt",single.row = TRUE,
+                     suppress.errors = TRUE, no.space = TRUE)
+```
+
+
+```{r label= plot2, fig= TRUE, include=TRUE, cache=TRUE}
+plot(ltexp,FoodShr,type="n",main="Engel Curve",xlab="Log(Exp)",ylab = "FoodShare")
+points(ltexp,FoodShr,pch=".")
+lmFood <- lm(FoodShr ~ poly(ltexp, degree=1,raw=TRUE))
+newx <- seq(from=min(ltexp),to=max(ltexp),length.out = 200)
+lines(newx, predict(lmFood, data.frame(ltexp = newx)))
+```
+
+# Modèle polynomial
+```{r cache=TRUE}
+lmFood2 <- lm(FoodShr ~ poly(ltexp, degree=2,raw=TRUE))
+```
+
+
+```{r cache=TRUE, warning=FALSE, message=FALSE}
+cov <- vcovHC(lmFood2, type = "HC")
+robust.se <- sqrt(diag(cov))
+```
+
+
+```{r results="asis", cache=TRUE, include=TRUE}
+stargazer::stargazer(lmFood2,type=otype,se=list(robust.se),
+          title="Quadratic Model",header=FALSE,
+          style="aer",
+          column.sep.width = "1pt",single.row = TRUE,
+          suppress.errors = TRUE, no.space = TRUE)
+```
+
+
+# Plus proches voisins (KNN)
+
+We have a random sample of observations $Y_{i}$ and $X_{i}$ on
+univariate $Y$ and $X$ (say food consumption share and income)
+\[
+Y_{i} = E(Y_{i}|X_{i}) + \varepsilon_{i} = r (X_{i}) + \varepsilon_{i}
+\]
+We assume that $r(\cdot)$ is smooth
+
+* No jumps: continuous
+* No kinks: differentiable
+* Smooth enough: usually twice differentiable
+
+We want to estimate $r(\cdot)$.
+We talk about
+
+* **nonparametric regression**, since there is no parameter to be
+estimated.
+* **functional estimation**, since we estimate a
+ function.
+
+
+To make it simple, let us consider
+\[
+Y_{i} = r (X_{i}) + \varepsilon_{i}
+\]
+where
+\[
+0 \leq X_{1} = \frac{1}{n} \leq X_{2} = \frac{2}{n} \leq \ldots \leq
+X_{n} = 1
+\, .
+\]
+We cannot apply least-squares
+\[
+\min_{r(\cdot)} \sum_{i=1}^{n}{\left[ Y_{i} - r (X_{i})\right]^{2}}
+\]
+as we can always find a function $r(\cdot)$ that goes through every observation: this is called *interpolation*
+
+There is actually an infinity of such functions, these are defined uniquely only at observations points.
+
+With *nearest-neighbors*, we estimate $r (X_{i})$ by looking at observations around (close to) $X_{i}$. That's the idea of *smoothing*.
+
+We define the estimate of $r(X_{i})$ as
+\[
+\widehat{r} (X_{i}) = \frac{1}{k} \sum_{j =
+\underline{i}}^{\overline{i}}{ Y_{j}}
+\qquad \underline{i} = i - \frac{k-1}{2}
+\qquad \overline{i} = i + \frac{k-1}{2}
+\]
+
+$k$: number of neighbors of $X_{i}$ taken into account in estimation.
+
+This method is  called *k-nearest neighbors* or 
+*moving average*.
+
+Our estimator should be defined at any point $x$, even if $x$ is not an observation, so
+\[
+\widehat{r} (x) = \widehat{r} (X_{i})
+\]
+where $X_{i}$ is the closest point to $x$.
+
+So our estimator is a step function: piecewise constant.
+
+
+# Application
+
+```{r warning=FALSE, message=FALSE, cache=TRUE}
+library(caret)
+engelknn <- knnreg(FoodShr~ltexp, data = Engel, k = 55)
+```
+
+```{r label= plot5, fig= TRUE, include=TRUE, cache=TRUE}
+plot(ltexp,FoodShr,type="n",main="Engel Curve",xlab="Log(Exp)",ylab = "FoodShare")
+points(ltexp,FoodShr,pch=".")
+lines(newx, predict(engelknn, data.frame(ltexp = newx)))
+```
+
+# Properties
+
+If a function $r(\cdot)$ is twice differentiable with bounded second derivative at $x_{0}$, then for $x$ close to $x_{0}$ 
+\[
+r (x) \approx r (x_{0}) + (x - x_{0}) r' (x_{0}) +
+\frac{\left(x-x_{0}\right)^{2}}{2} r^{''} (x_{0})
+\]
+
+Remember
+
+* First derivative: Speed
+
+* Second derivative: Acceleration
+
+\[
+\widehat{r} (X_{i})   =  \frac{1}{k} \sum_{j =
+\underline{i}}^{\overline{i}}{ Y_{j}}
+=
+\frac{1}{k} \sum_{j =
+\underline{i}}^{\overline{i}}{ r (X_{j})}
++ \frac{1}{k} \sum_{j =
+\underline{i}}^{\overline{i}}{ \varepsilon_{j}}
+\]
+Since $X_{j}$ is close to $X_{i}$,
+\[
+r (X_{j})  =  r (X_{i}) + (X_{j} - X_{i}) r' (X_{i}) +
+\frac{\left(X_{j}-X_{i}\right)^{2}}{2} r^{''} (X_{i})
++
+o\left( (X_{j}-X_{i})^{2}\right)
+\]
+\[
+\widehat{r} (X_{i})   = 
+r (X_{i})
++
+r' (X_{i})
+\frac{1}{k} \sum_{j =\underline{i}}^{\overline{i}}
+{(X_{j} - X_{i}) }
++
+r^{''} (X_{i})
+\frac{1}{k} \sum_{j =\underline{i}}^{\overline{i}}
+\frac{\left(X_{j}-X_{i}\right)^{2}}{2}
+\]
+\[
++ o\left( \frac{1}{k} \sum_{j =\underline{i}}^{\overline{i}}
+\left(X_{j}-X_{i}\right)^{2}
+\right) +
+\frac{1}{k} \sum_{j =\underline{i}}^{\overline{i}}
+{ \varepsilon_{j}}
+\]
+
+* The first term is what we want to estimate!
+
+* The second term is zero if the $X_{i}$ are equidistant (should be close enough to zero in general).
+
+* The third term is 
+$r^{''} (X_{i}) \frac{1}{24} \left( \frac{k}{n} \right)^{2}$
+
+Hence
+\[
+\widehat{r} (X_{i})   \approx 
+r (X_{i}) +
+r^{''} (X_{i}) \frac{1}{24} \left( \frac{k}{n} \right)^{2} +
+\frac{1}{k} \sum_{j =\underline{i}}^{\overline{i}}
+{ \varepsilon_{j}}
+\]
+\[
+E\left[
+\widehat{r} (X_{i}) -
+r (X_{i})
+\right]
+ \approx 
+r^{''} (X_{i}) \frac{1}{24} \left( \frac{k}{n} \right)^{2}
+\]
+
+This is the *bias* of our estimator
+
+* Comes from using neighboring observations
+
+* Should go to zero, hence we should choose $k$ such that $k/n \rightarrow 0$, that is, $k$ small with respect to $n$.
+
+What about variance?
+\[
+Var \left[ \widehat{r} (X_{i})  \right]
+=
+Var\left[
+\frac{1}{k} \sum_{j =\underline{i}}^{\overline{i}}
+{ \varepsilon_{j}}
+\right]
+\]
+Since the errors are independent
+\[
+Var\left[
+\frac{1}{k} \sum_{j =\underline{i}}^{\overline{i}}
+{ \varepsilon_{j}}
+\right]
+=
+\frac{1}{k^{2}} \sum_{j =\underline{i}}^{\overline{i}}
+{Var( \varepsilon_{j})}
+=
+\frac{1}{k} \sigma^{2}_{\varepsilon}
+\]
+
+This is the *variance* of our estimator.
+
+* Using neighboring observations decreases the variance
+
+* Should go to zero, hence we should choose $k$ increasing with the sample size, $k \rightarrow \infty$.
+
+
+## Mean Squared Error
+
+This is the combination of the two previous terms
+\[
+E\left[
+\widehat{r} (X_{i}) -
+r (X_{i})
+\right]^{2} =
+\left\{
+E \left[
+\widehat{r} (X_{i}) -
+r (X_{i})
+\right]
+\right\}^{2}
++
+Var \left[ \widehat{r} (X_{i})
+ \right]
+\]
+*The MSE* is a measure of the precision for any estimator, and we always have
+\[
+MSE = Bias^{2} + Variance
+\]
+Here
+\[
+E\left[
+\widehat{r} (X_{i}) -
+r (X_{i})
+\right]^{2}
+\approx
+\left\{
+r^{''} (X_{i}) \frac{1}{24} \left( \frac{k}{n} \right)^{2}
+\right\}^{2}
++
+\frac{1}{k} \sigma^{2}_{\varepsilon}
+\]
+
+## Bias-Variance Trade-Off
+
+To minimize the MSE, we should balance squared bias and variance.
+
+Here, we should choose $k$ such that the squared bias is of the same order than the variance.
+
+**Optimal $k$** : 
+$k^{*} \propto n^{4/5}$
+and
+\[
+MSE^{*} \approx
+\left\{
+r^{''} (X_{i}) \frac{1}{24} \left( \frac{k^{*}}{n} \right)^{2}
+\right\}^{2}
++
+\frac{1}{k^{*}} \sigma^{2}_{\varepsilon}
+ \propto n^{-4/5}
+\]
+
+## Mean Integrated Squared Error
+
+The MSE is valid for $\widehat{r} (x)$, that is $r(\cdot)$ estimated at one point.
+
+But we have a functional estimator: we need a global criterion.
+\[
+MISE = \int{ E \left[\widehat{r} (x) - r (x)\right]^{2}
+f(x) \, dx}
+\]
+where $f (x)$: density of $X$ at $x$ (To keep it simple, think of $f (x)= \mbox{cst}$ if $X$ uniform)
+
+To minimize the MISE, we should balance integrated squared bias and integrated variance.
+
+**Optimal $k$** : 
+$k^{*} \propto n^{4/5}$
+\[
+MISE^{*}
+ \propto n^{-4/5}
+\]
+
+## Under/Over Smoothing
+
+We have an optimal $k^{*}$ in mind
+
+* *Undersmoothing* is when we use too small a $k$.
+
+Think about $k=1$: we have interpolation.
+
+More generally undersmoothing occurs when we obtain a wiggly curve
+
+* *Oversmoothing* is when we use too large small $k$
+
+Think about $k=n$: the estimator $\widehat{r} (x) = \bar{Y}$ for any $x$!
+
+More generally oversmothing occurs when we obtain too flat a curve.
+
+
+In practice, it may be tricky to determine whether we have the optimal amount of smoothing / undersmoothing / oversmoothing.
+
+
+

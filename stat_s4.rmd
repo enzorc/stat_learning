@@ -1,0 +1,365 @@
+---
+pdf_document: default
+author: "Enzo Ramirez, Pauline De taeye"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+html_document:
+  df_print: paged
+title: "Bootstrap Lab"
+word_document: default
+---
+  
+```{r Knitr_Global_Options, include=FALSE, cache=TRUE}
+setwd('V:/export')
+
+# Donner le nom du répertoire pour installer les librairies
+.libPaths("K:/M2ST/Lib")
+library(knitr)
+opts_chunk$set(warning = FALSE, message = FALSE, 
+               autodep = TRUE, tidy = FALSE,
+               fig.dim=c(8,3))
+```
+
+
+```{r Libraries, cache=FALSE, warning=FALSE, message=FALSE, echo=FALSE}
+library(boot)
+#install.packages("foreach")
+library(foreach)
+library(pracma)
+```
+
+
+# Ex 2 
+  
+Now redo Ex 1 Questions 1, 2, 4 to 7 focusing on estimating the variance of $x$. 
+  
+
+In this exercise, we use the package **boot** to calculate a bootstrap estimate of the variance of the sample mean and build a confidence interval. 
+
+  1. Using the function *rchisq*, generate a random sample of size $n=25$ from the $\chi^2_1$ distribution. Denoting the sample variance estimator as $V(x)$, what is the value of $V(x)$ on this particular sample? Compare with the population variance.
+
+
+```{r}
+set.seed(2020)
+n <- 25
+mysample <- rchisq(n, df = 1)
+Population.var <- 2
+cat("\n", "sample variance : ", var(mysample), "\n", "population variance : "  , Population.var)
+```
+
+We can see that the mean estimate is larger than the population
+
+
+  2. Compute theoretically the variance and standard deviation of the estimator $V(x)$ in the present setup, that is, for a random sample of size $25$ from the $\chi^2_1$ distribution?
+
+
+```{r}
+mean(mysample)
+std(mysample)
+var(mysample)
+```
+
+
+
+    4.
+
+
+```{r}
+boot.var <- function(asample, indices) {
+  var(asample[indices])
+}
+```
+
+  5. Use the *boot* function to generate $B=10000$ sample var of bootstrap samples. Store the results in an object.
+Which information is included in this object?
+Compute the resulting bootstrap estimate of the variance of $\bar{x}$. 
+
+
+```{r}
+B <- 10000
+# tic()
+res.boot <- boot(mysample,boot.var,B)
+# toc()
+names(res.boot)
+```
+
+
+
+  6. What are the sample mean and the sample variance of the bootstrap variance?
+
+
+
+```{r}
+mean(res.boot$t)
+var(res.boot$t)
+sd(res.boot$t)
+```
+
+
+
+  7. Show a histogram of the $B=10000$ sample means. Identify the population mean, the sample mean of the original sample, and the mean of the bootstrap means.
+
+
+
+```{r}
+hist(res.boot$t, col="lightgrey", xlab="Sample Variance", breaks=50,   main="Distribution of the Variance of B=10000 bootstrap samples")
+Population.mean <- 1
+Population.var <- 2
+abline(v=Population.var, lwd=2, col="blue")
+abline(v=var(mysample), lwd=2, col="red")
+abline(v=mean(res.boot$t), lwd=2, col="orange")
+legend("topleft", lwd=2, col=c("blue", "red", "orange"), legend=c("Population variance", "Sample mean", "Mean of bootstrap Variance"))
+```
+
+
+
+# Ex 3
+
+This exercise illustrates how the bootstrap can be used in linear regression to obtain (i) confidence intervals for the parameters and (ii) confidence bounds for the prediction.
+
+For $\alpha=-1$ and $\beta=2$, generate a random sample $(X_1,Y_1),\ldots,(X_{20},Y_{20})$ from the linear regression model :
+    
+$Y = \alpha + \beta X+ 0.5 (\varepsilon-1)$
+  
+
+Where $X$ is uniformly distributed over $[0,1]$,
+
+$\varepsilon$ is chi-square distributed  with 1 degree of freedom,
+
+and where $X$ and $\varepsilon$ are independent
+
+(note that, in this model, the least squares estimators of $\alpha$ and $\beta$ *do not* follow the usual normal distribution, which makes inference more challenging). 
+
+
+```{r}
+set.seed(2020)
+n <- 20
+alpha <- -1
+beta <- 2
+
+epsilon <- rchisq(n, df = 1)
+mean(epsilon)
+
+X <- runif(n, 0, 1)
+mean(X)
+
+Y = alpha +beta*X + 0.5 * (epsilon -1)
+
+df <- data.frame("Y" = Y, "X" = X)
+```
+
+
+
+  1. Make a scatter plot of this sample. Add to the plot the true linear relationship, namely the straight line $y=2x-1$. 
+
+
+
+```{r}
+plot(X, Y, main="Scatterplot",
+    xlab="X var",
+    ylab="Y var",
+    pch=19)
+# abline(lm(Y ~ X), col = "blue")
+lines(lowess(X,2*X-1))
+```
+
+
+
+  2. What are the least-squares estimators? Add to the plot the corresponding estimated linear regression line.
+
+
+
+```{r}
+plot(X, Y, main="Scatterplot",
+    xlab="X var",
+    ylab="Y var",
+    pch=19)
+abline(lm(Y ~ X), col = "blue")
+lines(lowess(X,2*X-1))
+```
+
+
+
+
+  3. Use the function *boot* to find a 95\% confidence interval for $\hat{\alpha}$ from $B=5000$ bootstrap samples. Repeat the exercise for $\hat{\beta}$.
+
+
+
+```{r}
+B <- 5000
+
+paste("------------------------------------------------------------------------")
+
+# tic()
+boot.reg <- function(formula, data, indices) {
+  d <- data[indices,] # allows boot to select sample
+  fit <- lm(formula, data=d)
+  return(coef(fit))
+}
+
+# bootstrapping with B replications
+x.boot <- boot(data=df,
+               statistic=boot.reg,
+               R=B,
+               formula=Y~X)
+# toc()
+
+names(x.boot)
+x.coef.o <- as.data.frame(t(x.boot$t0))
+
+paste("------------------------------------------------------------------------")
+
+x.boot
+
+paste("------------------------------------------------------------------------")
+
+# colMeans(x.boot$t)
+
+cat( "mean alpha : ", mean(x.boot$t[,1]),  "/ mean beta : ", mean(x.boot$t[,2] ))
+cat("\n")
+cat( "variance alpha : ", var(x.boot$t[,1]), "/ variance beta : ", var(x.boot$t[,2] ))
+
+
+paste("------------------------------------------------------------------------")
+
+q1.alpha <- quantile(x.boot$t[,1] - x.coef.o[,1], probs = 0.025)
+q2.alpha <- quantile(x.boot$t[,1] - x.coef.o[,1], probs = 0.975)
+
+q1.beta <- quantile(x.boot$t[,2] - x.coef.o[,2], probs = 0.025)
+q2.beta <- quantile(x.boot$t[,2] - x.coef.o[,2], probs = 0.975)
+
+cat("alpha est compris entre : ", c(x.coef.o[,1] - q2.alpha, x.coef.o[,1] - q1.alpha))
+cat("\n")
+cat("beta est compris entre : " , c(x.coef.o[,2] - q2.beta, x.coef.o[,2] - q1.beta))
+
+paste("------------------------------------------------------------------------")
+
+boot.ci(x.boot)
+
+paste("------------------------------------------------------------------------")
+
+```
+
+
+
+  4. Use the function *boot* to obtain a 95\% confidence interval for each of the predictions associated with $x=0, 0.05, 0.1, \ldots,0.95, 1$ (use $B=5000$ bootstrap samples).\
+  Add the corresponding lower and upper bounds for the prediction (as functions of $x$) to the previous plot.
+
+
+
+```{r}
+x.boot <- boot(data=df,
+                   statistic=boot.reg,
+                   R=B,
+                   formula=Y~X)
+```
+
+
+
+
+
+```{r}
+B <- 5000
+
+boot.reg <- function(formula, data, indices) {
+  d <- data[indices,] # allows boot to select sample
+  fit <- lm(formula, data=d)
+  return(coef(fit))
+}
+
+vec.down <- c()
+vec.up <- c()
+vec.x <- c()
+
+
+paste("------------------------------------------------------------------------")
+for (xx in seq(0.05, 1, by=0.05)){
+    print(paste("The x is", xx))
+    x <- rep(xx, n)
+
+    Y = alpha +beta*x + 0.5 * (epsilon -1)
+
+    df1 <- data.frame("Y" = Y, "X" = X)
+
+    paste("------------------------------------------------------------------------")
+
+    # tic()
+
+    # bootstrapping with B replications
+    x.boot <- boot(data=df1,
+                   statistic=boot.reg,
+                   R=B,
+                   formula=Y~X)
+    # toc()
+
+    names(x.boot)
+    x.coef.o <- as.data.frame(t(x.boot$t0))
+
+    paste("------------------------------------------------------------------------")
+
+    x.boot
+
+    paste("------------------------------------------------------------------------")
+
+    # colMeans(x.boot$t)
+
+    cat( "mean alpha : ", mean(x.boot$t[,1]),  "/ mean beta : ", mean(x.boot$t[,2] ))
+    cat("\n")
+    cat( "variance alpha : ", var(x.boot$t[,1]), "/ variance beta : ", var(x.boot$t[,2] ))
+    cat("\n")
+    cat("\n")
+
+
+    paste("------------------------------------------------------------------------")
+
+    q1.alpha <- quantile(x.boot$t[,1] - x.coef.o[,1], probs = 0.025)
+    q2.alpha <- quantile(x.boot$t[,1] - x.coef.o[,1], probs = 0.975)
+
+    q1.beta <- quantile(x.boot$t[,2] - x.coef.o[,2], probs = 0.025)
+    q2.beta <- quantile(x.boot$t[,2] - x.coef.o[,2], probs = 0.975)
+
+    cat("alpha est compris entre : ", c(x.coef.o[,1] - q2.alpha, x.coef.o[,1] - q1.alpha))
+    cat("\n")
+    cat("beta est compris entre : " , c(x.coef.o[,2] - q2.beta, x.coef.o[,2] - q1.beta))
+    cat("\n")
+    
+    y.down <- (x.coef.o[,1] - q2.alpha) + (x.coef.o[,2] - q2.beta)*xx
+    y.up <- (x.coef.o[,1] - q1.alpha) + (x.coef.o[,2] - q1.beta)*xx
+    
+    cat( "y est compris entre : " , c( y.down  , y.up ))
+    
+    vec.down <- append(vec.down, y.down)
+    vec.up <- append(vec.up, y.up)
+    vec.x <- append(vec.x, xx)
+
+    cat("\n")
+    cat("\n")
+    cat("\n")
+    
+
+    
+    
+}
+
+plot.conf <- data.frame("x" = vec.x,
+                          "down" = vec.down,
+                          "upper" = vec.up)
+df$upper <- vec.up
+df$down <- vec.down
+df$xx <- vec.x
+
+plot(df$X, df$Y, main="Scatterplot",
+    xlab="X var",
+    ylab="Y var",
+    pch=20)
+abline(lm(df$Y ~ df$X), col = "blue")
+lines(lowess(X,2*X-1))
+points(df$xx, df$down, col = "red", pch = 20)
+points(df$xx, df$upper, col = "blue", pch = 20)
+
+
+paste("------------------------------------------------------------------------")
+```

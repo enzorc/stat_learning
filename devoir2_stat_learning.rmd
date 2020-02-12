@@ -1,0 +1,244 @@
+---
+title: 'Devoir 2 - Classification'
+author: "Enzo Ramirez, Pauline De Taeye"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: 
+    keep_tex: yes
+    number_sections: true
+  html_document:
+    keep_md: yes
+    number_sections: true
+fontsize: 12pt
+header-includes:
+- \usepackage{amsmath}
+- \newcommand{\E}{\operatorname{E}}
+---
+
+```{r Knitr_Global_Options, include=FALSE, cache=TRUE}
+library(knitr)
+opts_chunk$set(warning = FALSE, message = FALSE, 
+               autodep = TRUE, tidy = FALSE,
+               cache.extra = packageVersion('tufte'),
+               fig.dim=c(8,2.6))
+```
+
+# EXERCICE 11
+
+
+```{r Libraries, cache=FALSE, warning=FALSE, message=FALSE, echo=FALSE}
+
+.libPaths("K:/M2ST/Lib")
+
+library(AppliedPredictiveModeling)
+library(ISLR)
+library(caret)
+library(MASS)
+library(e1071)
+```
+
+
+```{r, cache=TRUE}
+data(Auto)
+attach(Auto)
+set.seed(1234)
+```
+
+## QUESTION A
+
+
+```{r, cache=TRUE}
+med_mpg <- median(Auto$mpg)
+Auto$mpg01[Auto$mpg > med_mpg] <- 1
+Auto$mpg01[Auto$mpg < med_mpg] <- 0
+
+Auto <- Auto[,-c(1,9)]
+
+apply(Auto, 2, function(x) any(is.na(x)))
+```
+
+## QUESTION B
+
+
+```{r, cache=TRUE}
+pairs(Auto)
+cor(Auto)
+```
+
+
+```{r, cache=TRUE}
+index <- createDataPartition(Auto$mpg01, p=0.75, list=FALSE)
+
+train <- Auto[index, ]
+test <- Auto[-index, ]
+```
+
+
+#### Correlation and variables of interests
+
+From the corelation matrix we can see that mpg01 is strongly negatively corelated with cylinders which is the Number of cylinders between 4 and 8, with the vehicle weight, with the engine displacement and also negatively corelated with the engine horsepower. So those four features seems useful in predicting mpg01.
+
+## Confusion matrix
+
+We will use a binary classifier for our data.
+It will predict on the data if our point is ***positive*** (under median) or ***negative*** (above median). 
+These predictions jointly with the actual prediction allow us to produce a ***confusion matrix*** with 4 different value :
+
+- true positive  *( predicted above median and actually above median )*
+- true negative  *( predicted under median and actually under median )*
+- false positive *( predicted above median and actually under median )*
+- false negative *( predicted under median and actually above median )*
+
+
+## Error Rate
+
+Once we have obtained all the values we can compute some rate :
+
+the test error rate measure the number of false prediction under the total number of predictions on our test data.
+
+
+\begin{equation*}
+\text{Test error rate} = \frac{\text{False positive + False negative}}{\text{True positive + True negative + False positive + False negative}} 
+\end{equation*}
+
+
+## QUESTION C
+
+
+```{r, cache=TRUE}
+Auto$mpg01 <- factor(Auto$mpg01)
+levels(Auto$mpg01) <- c("above", "under")
+train <- Auto[index, ]
+test <- Auto[-index, ]
+```
+
+## QUESTION D
+
+
+```{r, cache=TRUE}
+asso <- c("cylinders", "displacement", "horsepower", "weight", "mpg01")
+not_asso <- c("acceleration", "year", "origin", "mpg", "name")
+
+TrControl <- trainControl(method = "none",
+                          classProbs=TRUE,
+                          savePredictions = TRUE)
+
+model_lda <- train(mpg01 ~ . , data = train[ , !(names(Auto) %in% not_asso)],
+             method = "lda",
+             trControl = TrControl)
+
+varImp(object=model_lda)
+plot(varImp(object=model_lda),main="LDA - Variable Importance")
+
+pred_lda <- predict(model_lda, newdata = test[ , !(names(Auto) %in% not_asso)])
+caret::confusionMatrix(data = pred_lda, reference = test$mpg01,
+                       positive = "above", mode = "everything")
+```
+
+
+#### What is the test error of the model obtained ?
+
+\begin{equation*}
+\text{Test error rate} = \frac{\text{1 + 11}}{\text{1 + 11 + 38 + 48}} =  0,1224
+\end{equation*}
+
+We can observe that we have way more false negative (11) in this case than false positive (1).
+
+## QUESTION E
+
+
+```{r, cache=TRUE}
+model_qda <- train(mpg01 ~ . , data = train[ , !(names(Auto) %in% not_asso)],
+                   method = "qda",
+                   trControl = TrControl)
+
+varImp(object=model_qda)
+plot(varImp(object=model_qda),main="QDA - Variable Importance")
+
+pred_qda <- predict(model_qda, newdata = test[ , !(names(Auto) %in% not_asso)])
+caret::confusionMatrix(data = pred_qda, reference = test$mpg01,
+                       positive = "above", mode = "everything")
+
+
+```
+
+#### What is the test error of the model obtained?
+
+\begin{equation*}
+\text{Test error rate} = \frac{\text{3 + 9}}{\text{3 + 9 + 40 + 46}} = 0,1224
+\end{equation*}
+
+We can observe that we have more false negative (9) in this case than false positive (3).
+
+## QUESTION F
+
+
+```{r, cache=TRUE}
+model_log <- train(mpg01 ~ . , data = train[ , !(names(Auto) %in% not_asso)],
+                   method = "glm",
+                   trControl = TrControl)
+
+varImp(object=model_log)
+plot(varImp(object=model_log), main="Logistic - Variable Importance")
+
+pred_log <- predict(model_log, newdata = test[ , !(names(Auto) %in% not_asso)])
+caret::confusionMatrix(data = pred_log, reference = test$mpg01,
+                       positive = "above", mode = "everything")
+
+
+```
+
+
+#### What is the test error of the model obtained?
+
+\begin{equation*}
+\text{Test error rate} = \frac{\text{2 + 11}}{\text{2 + 11 + 38 + 47}} = 0,1326
+\end{equation*}
+
+We can observe that we have more false negative (11) in this case than false positive (2).
+
+## QUESTION G
+
+
+```{r, cache=TRUE}
+TrControl <- trainControl(method="repeatedcv",
+                          repeats = 10,
+                          classProbs=TRUE,
+                          savePredictions = TRUE)
+
+model_knn <- train(mpg01 ~ . , data = train[ , !(names(Auto) %in% not_asso)],
+                   method = "knn",
+                   trControl = TrControl)
+
+varImp(object=model_knn)
+plot(varImp(object=model_knn),main="KNN - Variable Importance")
+
+
+pred_knn <- predict(model_knn, newdata = test[ , !(names(Auto) %in% not_asso)],
+                    preProcess = c("center","scale"), tuneLength = 20)
+caret::confusionMatrix(data = pred_knn, reference = test$mpg01,
+                       positive = "above", mode = "everything")
+
+plot(model_knn)
+```
+
+
+#### What is the test error of the model obtained?
+
+\begin{equation*}
+\text{Test error rate} = \frac{\text{3 + 11}}{\text{3 + 11 + 38 + 46}} = 0,1428
+\end{equation*}
+
+We can observe that we have more false negative (11) in this case than false positive (3).
+
+#### Which value of K seems to perform the best on this data set?
+
+From the accuracy plot it seems that K=7 is the best to have the better accuracy rate.
+
+
+
+
+
+```
+
+```
